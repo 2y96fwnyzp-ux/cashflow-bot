@@ -35,8 +35,8 @@ CHAT_ID   = os.getenv("CHAT_ID", "")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 TIMEZONE = pytz.timezone('Europe/Kyiv')
 
-DEAL_CASH     = 4   # Готівка сальдо
-DEAL_TERMINAL = 55  # Термінал сальдо
+ACCOUNT_CASH     = 3   # debit_account=3 → Готівка
+ACCOUNT_TERMINAL = 7   # debit_account=7 → Термінал
 
 class InstasportBot:
     def __init__(self):
@@ -62,49 +62,61 @@ class InstasportBot:
             logger.error(f"❌ Помилка: {e}")
             return False
 
-    def get_deal_value(self, deal_id, date_str):
-        """Отримує суму для конкретного deal за день"""
+    def fetch_transactions(self, date_str):
+        """Тягне ВСІ транзакції за день (з усіх сторінок)"""
+        headers = {
+            'Authorization': f'Bearer {self.token}',
+            'X-API-Key': API_KEY
+        }
+        date_next = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        url = (
+            f"{INSTASPORT_URL}/admin/club/{CLUB_SLUG}/api/v2/manager/transaction/"
+            f"?hall={HALL_ID}"
+            f"&date_effective_after={date_str}"
+            f"&date_effective_before={date_next}"
+            f"&page_size=200"
+        )
+        results = []
         try:
-            headers = {
-                'Authorization': f'Bearer {self.token}',
-                'X-API-Key': API_KEY
-            }
-
-            # Правильний фільтр дати
-            date_next = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-
-            url = (
-                f"{INSTASPORT_URL}/admin/club/{CLUB_SLUG}/api/v2/manager/transaction/"
-                f"?deal={deal_id}&hall={HALL_ID}"
-                f"&date_effective_after={date_str}"
-                f"&date_effective_before={date_next}"
-            )
-
-            r = requests.get(url, headers=headers, timeout=10)
-
-            if r.status_code == 200:
-                results = r.json().get('results', [])
-                total = sum(float(t.get('value', 0)) for t in results)
-                logger.info(f"   deal={deal_id}: {total:,.2f} грн ({len(results)} записів)")
-                return total
-            else:
-                logger.error(f"❌ Помилка deal={deal_id}: {r.status_code}")
-                return 0
-
+            while url:
+                r = requests.get(url, headers=headers, timeout=20)
+                if r.status_code != 200:
+                    logger.error(f"❌ Помилка транзакцій: {r.status_code}")
+                    break
+                d = r.json()
+                results.extend(d.get('results', []))
+                url = d.get('next')
         except Exception as e:
             logger.error(f"❌ Помилка: {e}")
-            return 0
+        return results
 
     def fetch_cashflow(self, date_str):
-        """Витягує касовий звіт за день"""
+        """Витягує касовий звіт за день.
+        Готівка = сума value де debit_account=3
+        Термінал = сума value де debit_account=7
+        """
         logger.info(f"📌 Витягування касового звіту за {date_str}...")
 
-        cash_balance     = self.get_deal_value(DEAL_CASH, date_str)
-        terminal_balance = self.get_deal_value(DEAL_TERMINAL, date_str)
-        total_balance    = cash_balance + terminal_balance
+        txs = self.fetch_transactions(date_str)
+        logger.info(f"   Отримано транзакцій: {len(txs)}")
 
-        logger.info(f"✅ Готівка: {cash_balance:,.2f} грн")
-        logger.info(f"✅ Термінал: {terminal_balance:,.2f} грн")
+        cash_balance = 0.0
+        terminal_balance = 0.0
+        for t in txs:
+            try:
+                val = float(t.get('value', 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            acc = t.get('debit_account')
+            if acc == ACCOUNT_CASH:
+                cash_balance += val
+            elif acc == ACCOUNT_TERMINAL:
+                terminal_balance += val
+
+        total_balance = cash_balance + terminal_balance
+
+        logger.info(f"✅ Готівка (debit={ACCOUNT_CASH}): {cash_balance:,.2f} грн")
+        logger.info(f"✅ Термінал (debit={ACCOUNT_TERMINAL}): {terminal_balance:,.2f} грн")
         logger.info(f"✅ Всього: {total_balance:,.2f} грн")
 
         return {
