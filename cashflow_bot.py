@@ -6,8 +6,13 @@ deal=4  → Готівка сальдо
 deal=55 → Термінал сальдо
 Фільтр: date_effective_after / date_effective_before
 Відправляє в Telegram о 21:50
+
+Усі секрети читаються зі змінних оточення (Railway Variables):
+  TELEGRAM_BOT_TOKEN, CHAT_ID, INSTASPORT_API_KEY,
+  INSTASPORT_EMAIL, INSTASPORT_PASSWORD, CLUB_SLUG, HALL_ID
 """
 
+import os
 import sys
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -20,13 +25,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 INSTASPORT_URL = "https://instasport.ua"
-CLUB_SLUG = "planetfitness"
-HALL_ID = "1376"
-EMAIL = "m-g-r@gmx.de"
-PASSWORD = "Prepremium1990--"
-API_KEY = "3q8hnVD33+HCZdDenynXq85oD0m8rhqHE/hSQbi2JxY="
-BOT_TOKEN = "8826656917:AAHRDxS_q_vgWJ3sjvs67zY4V1Iqoq4sJDs"
-CHAT_ID = "438857354"
+CLUB_SLUG = os.getenv("CLUB_SLUG", "planetfitness")
+HALL_ID   = os.getenv("HALL_ID", "1376")
+EMAIL     = os.getenv("INSTASPORT_EMAIL", "")
+PASSWORD  = os.getenv("INSTASPORT_PASSWORD", "")
+API_KEY   = os.getenv("INSTASPORT_API_KEY", "")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID   = os.getenv("CHAT_ID", "")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 TIMEZONE = pytz.timezone('Europe/Kyiv')
 
@@ -161,6 +166,11 @@ def main():
     logger.info("🤖 Запуск бота касового звіту")
     logger.info(f"📍 Клуб: {CLUB_SLUG}, Зал: {HALL_ID}")
     logger.info(f"⏰ Звіт о 21:50 (UTC+3)\n")
+
+    # Перевірка що секрети задані
+    if not BOT_TOKEN or not API_KEY or not EMAIL or not PASSWORD:
+        logger.error("❌ Не задані змінні оточення! Перевір Railway Variables: "
+                     "TELEGRAM_BOT_TOKEN, CHAT_ID, INSTASPORT_API_KEY, INSTASPORT_EMAIL, INSTASPORT_PASSWORD")
 
     bot = InstasportBot()
     scheduler = BackgroundScheduler(timezone=TIMEZONE)
